@@ -6,21 +6,16 @@
 #include <algorithm>
 #include <cmath>
 
-// ============================================================================
-// CONFIGURATION PARAMETERS
-// ============================================================================
+//config
 #define CALIB_PACKETS       300     // Calibration window (~3 seconds @ 100Hz)[cite: 2]
 #define WINDOW_SIZE         100     // Moving variance window size[cite: 2]
 #define HAMPEL_WINDOW       7       // Hampel filter window size[cite: 2]
 #define HAMPEL_THRESHOLD    5.0f    // Hampel filter MAD multiplier threshold[cite: 2]
 #define DEFAULT_THRESHOLD   0.0018f // Tuned default CV threshold for skipped calibration[cite: 2]
 
-// 12 non-consecutive subcarriers in HT20 mode (avoiding DC zone index 32)[cite: 2]
+// 12 subC
 const uint8_t TARGET_SUBCARRIERS[12] = {12, 14, 16, 18, 20, 24, 28, 36, 40, 44, 48, 52};
 
-// ============================================================================
-// PIPELINE DATA STRUCTURES & STATE MACHINE
-// ============================================================================
 enum PipelineState {
   STATE_CALIBRATING,
   STATE_RUNNING
@@ -33,7 +28,7 @@ struct CsiPacket {
   uint16_t len;
 };
 
-// ICMP Ping Header Structure
+// icmp for ping
 struct icmp_hdr {
   uint8_t  type;
   uint8_t  code;
@@ -49,7 +44,7 @@ uint32_t packetCount = 0;
 uint32_t totalProcessedPackets = 0;
 uint32_t lastPrintTime = 0;
 
-// Circular Buffers
+// buffer check values
 float turbulenceBuffer[WINDOW_SIZE];
 int   turbIdx = 0;
 int   turbCount = 0;
@@ -63,10 +58,7 @@ uint32_t baselineMvSamples = 0;
 float adaptiveThreshold = DEFAULT_THRESHOLD;
 bool  motionState = false;
 
-// ============================================================================
-// STATISTICAL & DSP HELPER FUNCTIONS
-// ============================================================================
-// Hampel Filter for outlier removal using Median Absolute Deviation (MAD)[cite: 2]
+// filter remove median (page4)
 float applyHampelFilter(float val) {
   hampelBuffer[hampelIdx] = val;
   hampelIdx = (hampelIdx + 1) % HAMPEL_WINDOW;
@@ -86,13 +78,13 @@ float applyHampelFilter(float val) {
   if (mad > 1e-6f) {
     float threshold_scaled = HAMPEL_THRESHOLD * 1.4826f;
     if (std::abs(val - median) / mad > threshold_scaled) {
-      return median; // Replace outlier with window median[cite: 2]
+      return median; // idk?
     }
   }
   return val;
 }
 
-// Dynamic Two-Pass Moving Variance Calculation[cite: 2]
+// 2pass go
 float computeMovingVariance(float newVal) {
   turbulenceBuffer[turbIdx] = newVal;
   turbIdx = (turbIdx + 1) % WINDOW_SIZE;
@@ -113,7 +105,7 @@ float computeMovingVariance(float newVal) {
   return varSum / n;
 }
 
-// Standard Internet Checksum Calculation for ICMP
+// icmp ping checksum for true cond
 uint16_t calculateChecksum(uint16_t *buf, int len) {
   uint32_t sum = 0;
   while (len > 1) {
@@ -128,9 +120,7 @@ uint16_t calculateChecksum(uint16_t *buf, int len) {
   return (uint16_t)(~sum);
 }
 
-// ============================================================================
-// WIFI CSI HARDWARE CALLBACK
-// ============================================================================
+//harware part
 void IRAM_ATTR wifiCsiCallback(void* ctx, wifi_csi_info_t* data) {
   if (!data || !data->buf) return;
 
@@ -149,9 +139,7 @@ void IRAM_ATTR wifiCsiCallback(void* ctx, wifi_csi_info_t* data) {
   }
 }
 
-// ============================================================================
-// HIGH-SPEED ICMP PING GENERATOR TASK
-// ============================================================================
+//ddos with ping
 void trafficGeneratorTask(void* pvParameters) {
   vTaskDelay(pdMS_TO_TICKS(200));
 
@@ -176,7 +164,7 @@ void trafficGeneratorTask(void* pvParameters) {
     if (WiFi.status() == WL_CONNECTED) {
       memset(packetBuf, 0, sizeof(packetBuf));
       icmp_hdr *icmp = (icmp_hdr*)packetBuf;
-      icmp->type = 8; // ICMP Echo Request
+      icmp->type = 8;
       icmp->code = 0;
       icmp->id = htons(0x1234);
       icmp->seq = htons(seq++);
@@ -185,13 +173,11 @@ void trafficGeneratorTask(void* pvParameters) {
 
       sendto(sock, packetBuf, sizeof(packetBuf), 0, (struct sockaddr*)&destAddr, sizeof(destAddr));
     }
-    vTaskDelay(pdMS_TO_TICKS(10)); // ~100 Hz sampling rate
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
-// ============================================================================
-// DSP PROCESSING TASK
-// ============================================================================
+//process res
 void dspProcessingTask(void* pvParameters) {
   CsiPacket pkt;
 
@@ -200,9 +186,7 @@ void dspProcessingTask(void* pvParameters) {
       packetCount++;
       totalProcessedPackets++;
 
-      // ----------------------------------------------------------------------
-      // AMPLITUDE EXTRACTION & CV NORMALIZED TURBULENCE[cite: 2]
-      // ----------------------------------------------------------------------
+      // turbulance filte
       float amplitudes[12];
       float ampSum = 0.0f;
 
@@ -212,7 +196,7 @@ void dspProcessingTask(void* pvParameters) {
         if (offset + 1 < pkt.len) {
           int8_t q = pkt.raw_buf[offset];
           int8_t i_val = pkt.raw_buf[offset + 1];
-          amplitudes[i] = std::sqrt((float)(i_val * i_val + q * q)); // |H| = sqrt(I^2 + Q^2)[cite: 2]
+          amplitudes[i] = std::sqrt((float)(i_val * i_val + q * q)); // page8
         } else {
           amplitudes[i] = 0.0f;
         }
@@ -229,18 +213,16 @@ void dspProcessingTask(void* pvParameters) {
       }
       float stdDev = std::sqrt(sqDiffSum / 12.0f);
 
-      // Coefficient of Variation (CV = std / mean) for Gain-Invariant Turbulence[cite: 2]
+      // CV = std / mean page 10
       float cvTurbulence = stdDev / meanAmp;
 
-      // Signal Conditioning: Hampel Filter[cite: 2]
+      // Hampel Filter page 11
       float filteredTurbulence = applyHampelFilter(cvTurbulence);
 
-      // Moving Variance (MVS)[cite: 2]
+      // Moving Variance page 11
       float mv = computeMovingVariance(filteredTurbulence);
 
-      // ----------------------------------------------------------------------
-      // PHASE 1: BASELINE CALIBRATION (IF ENABLED)[cite: 2]
-      // ----------------------------------------------------------------------
+      // calib check yes
       if (currentState == STATE_CALIBRATING) {
         if (packetCount > 10) {
           baselineMvAccumulator += mv;
@@ -254,7 +236,7 @@ void dspProcessingTask(void* pvParameters) {
         if (packetCount >= CALIB_PACKETS) {
           float avgBaselineMv = (baselineMvSamples > 0) ? (baselineMvAccumulator / baselineMvSamples) : 0.0005f;
           
-          // Lowered multiplier to 1.6x for high motion sensitivity close to AP[cite: 2]
+          // x1.6 work good with max 10m, x1 max 25m, x< for closer to ap
           adaptiveThreshold = avgBaselineMv * 1.6f;
           if (adaptiveThreshold < 0.0005f) adaptiveThreshold = 0.0005f;
 
@@ -269,13 +251,10 @@ void dspProcessingTask(void* pvParameters) {
         continue;
       }
 
-      // ----------------------------------------------------------------------
-      // PHASE 2: REAL-TIME MOTION DETECTION
-      // ----------------------------------------------------------------------
+      //estimate
       if (currentState == STATE_RUNNING) {
         motionState = (mv > adaptiveThreshold);
 
-        // Live status output 5 times per second (every 200 ms)
         uint32_t now = millis();
         if (now - lastPrintTime >= 200) {
           lastPrintTime = now;
@@ -290,9 +269,7 @@ void dspProcessingTask(void* pvParameters) {
   }
 }
 
-// ============================================================================
-// INTERACTIVE AP SCANNER
-// ============================================================================
+// ask user
 void scanAndSelectAP(String &ssid, String &password, int &channel) {
   while (true) {
     Serial.println("\n[WIFI SCANNER] Scanning for Wi-Fi Access Points...");
@@ -364,9 +341,7 @@ void scanAndSelectAP(String &ssid, String &password, int &channel) {
   }
 }
 
-// ============================================================================
-// INTERACTIVE CALIBRATION PROMPT
-// ============================================================================
+// ask chatgpt for nice text output
 bool askCalibrationPrompt() {
   Serial.println("\n-------------------------------------------------------------------");
   Serial.println(">>> Run baseline calibration? [Y/n] (Auto-Yes in 5s)");
@@ -393,9 +368,7 @@ bool askCalibrationPrompt() {
   return true;
 }
 
-// ============================================================================
-// ARDUINO SETUP & MAIN LOOP
-// ============================================================================
+//void setup
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -404,19 +377,19 @@ void setup() {
   Serial.println("  ESP32-S3 High-Speed Wi-Fi CSI Motion Detector (ESPectre Engine)");
   Serial.println("===================================================================");
 
-  // 1. Initialize Wi-Fi in Station Mode
+  
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
 
-  // 2. Scan & User AP Selection
+  
   String selectedSSID = "";
   String selectedPass = "";
   int targetChannel = 0;
 
   scanAndSelectAP(selectedSSID, selectedPass, targetChannel);
 
-  // 3. Connect to Target AP
+  
   Serial.printf("\n[WIFI] Connecting to '%s'...", selectedSSID.c_str());
   WiFi.begin(selectedSSID.c_str(), selectedPass.c_str());
 
@@ -428,7 +401,7 @@ void setup() {
   Serial.printf("\n[WIFI] Connected! Gateway IP: %s | Channel: %d\n", 
                 WiFi.gatewayIP().toString().c_str(), WiFi.channel());
 
-  // 4. Ask User Whether to Run or Skip Calibration
+  // ASK RETURN FUNC FOR CALIB
   bool runCalib = askCalibrationPrompt();
   if (runCalib) {
     currentState = STATE_CALIBRATING;
@@ -437,7 +410,7 @@ void setup() {
     adaptiveThreshold = DEFAULT_THRESHOLD;
   }
 
-  // 5. Initialize Queue & CSI Hardware
+  // BUGGY QUEUE
   csiQueue = xQueueCreate(100, sizeof(CsiPacket));
 
   wifi_csi_config_t csi_config = {
@@ -456,7 +429,7 @@ void setup() {
 
   Serial.println("[CSI] Hardware receiver enabled.");
 
-  // 6. Pin Tasks to Cores
+  
   xTaskCreatePinnedToCore(trafficGeneratorTask, "TrafficTask", 4096, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(dspProcessingTask, "DSPTask", 8192, NULL, 2, NULL, 1);
 }
