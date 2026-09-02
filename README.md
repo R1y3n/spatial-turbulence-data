@@ -15,3 +15,6 @@ When physical movement occurs in an RF environment, channel amplitudes shift une
 * **Subcarriers:** 12 channels (equidistant or custom indices)
 * **Frequency:** 2.4 GHz band
 * **Values:** Raw linear proprietary format
+
+### note :
+the source code is available in GitLab only
