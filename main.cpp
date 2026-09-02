@@ -7,11 +7,11 @@
 #include <cmath>
 
 //config
-#define CALIB_PACKETS       300     // Calibration window (~3 seconds @ 100Hz)[cite: 2]
-#define WINDOW_SIZE         100     // Moving variance window size[cite: 2]
-#define HAMPEL_WINDOW       7       // Hampel filter window size[cite: 2]
-#define HAMPEL_THRESHOLD    5.0f    // Hampel filter MAD multiplier threshold[cite: 2]
-#define DEFAULT_THRESHOLD   0.0018f // Tuned default CV threshold for skipped calibration[cite: 2]
+#define CALIB_PACKETS       300     // calib
+#define WINDOW_SIZE         100     // varienc
+#define HAMPEL_WINDOW       7       // Hampel filt
+#define HAMPEL_THRESHOLD    5.0f    // Hampel filter x thres
+#define DEFAULT_THRESHOLD   0.0018f // if calib skip > def thres
 
 // 12 subC
 const uint8_t TARGET_SUBCARRIERS[12] = {12, 14, 16, 18, 20, 24, 28, 36, 40, 44, 48, 52};
