@@ -1,4 +1,4 @@
-# spatial turbulence algorithm on extracted amplitude data from 12 subcarriers over 2.4GHz
+# Application of spatial turbulence algorithm on extracted amplitude data from 12 subcarriers over 2.4GHz
 
 A lightweight algorithm that measures spatial turbulence using amplitude fluctuations across 12 subcarriers on the 2.4 GHz band.
 
